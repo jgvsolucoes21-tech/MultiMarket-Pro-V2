@@ -1,410 +1,383 @@
-/* global __app_id, __firebase_config, __initial_auth_token */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { 
-  getFirestore, doc, collection, onSnapshot, updateDoc, deleteDoc, setLogLevel, addDoc 
-} from 'firebase/firestore'; 
-// ELIMINADAS: query y getDocs (no se usan y fallan la compilación CI)
+    getAuth, 
+    signInAnonymously, 
+    signInWithCustomToken, 
+    onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+    getFirestore, 
+    collection, 
+    query, 
+    onSnapshot, 
+    addDoc, 
+    updateDoc, 
+    deleteDoc, 
+    doc, 
+    setLogLevel 
+} from 'firebase/firestore';
 
-// --- Constantes y Configuración ---
-// Variables de entorno proporcionadas por el entorno de Canvas
+// Definición de las variables globales proporcionadas por el entorno.
+// Importante: No modificamos estas líneas, solo aseguramos su existencia.
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Estados posibles de los pedidos
-const STATUS_OPTIONS = [
-  { value: 'new', label: 'Nuevo', color: 'bg-blue-500', icon: '📦' },
-  { value: 'preparing', label: 'En Preparación', color: 'bg-yellow-500', icon: '🛠️' },
-  { value: 'ready_to_ship', label: 'Listo para Despacho', color: 'bg-purple-500', icon: '🚚' },
-  { value: 'shipped', label: 'Enviado', color: 'bg-green-500', icon: '✅' },
-  { value: 'cancelled', label: 'Cancelado', color: 'bg-red-500', icon: '❌' },
-];
+// Estilos de Tailwind CSS (se asume que están configurados en el entorno)
 
-// Helper para obtener color y ícono de estado
-const getStatusDetails = (statusValue) => STATUS_OPTIONS.find(s => s.value === statusValue) || STATUS_OPTIONS[0];
+// --- Constantes de la Aplicación ---
+const COLLECTION_NAME = 'orders'; 
 
-// --- Componente Principal ---
+// --- Componente de la Aplicación ---
 const App = () => {
-  // Estado de la aplicación
-  const [db, setDb] = useState(null);
-  // Eliminada la declaración de 'auth' ya que solo se usa dentro de useEffect
-  const [userId, setUserId] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [orders, setOrders] = useState([]);
-  const [linkedMarketplaces, setLinkedMarketplaces] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [filter, setFilter] = useState('all'); // Filtro de estado
-  const [searchTerm, setSearchTerm] = useState(''); // Búsqueda
-
-  // --- 1. Inicialización de Firebase y Autenticación ---
-
-  useEffect(() => {
-    if (!firebaseConfig) {
-      setError("Error: La configuración de Firebase está ausente.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const app = initializeApp(firebaseConfig);
-      const firestore = getFirestore(app);
-      const authInstance = getAuth(app); // Usamos authInstance localmente
-      
-      setDb(firestore);
-      // setAuth(authInstance); // Eliminada setAuth, ya que auth no se usa fuera de este hook
-      setLogLevel('debug'); // Habilitar logs
-
-      const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
-        if (user) {
-          setUserId(user.uid);
-        } else if (initialAuthToken) {
-          // Si no hay usuario pero hay token, intentar iniciar sesión
-          await signInWithCustomToken(authInstance, initialAuthToken);
-        } else {
-          // Si no hay token, iniciar sesión anónimamente (para desarrollo)
-          await signInAnonymously(authInstance);
-        }
-        setIsAuthReady(true);
-      });
-
-      return () => unsubscribe();
-    } catch (e) {
-      console.error("Error al inicializar Firebase:", e);
-      setError(`Error al inicializar Firebase: ${e.message}`);
-      setLoading(false);
-    }
-  }, []);
-
-  // --- 2. Referencias a Colecciones ---
-
-  const getOrderCollectionRef = useCallback(() => {
-    if (!db || !userId) return null;
-    // Data pública compartida por todos los usuarios de la app
-    return collection(db, `artifacts/${appId}/public/data/orders`);
-  }, [db, userId]);
-
-  const getMarketplaceCollectionRef = useCallback(() => {
-    if (!db || !userId) return null;
-    // Data privada del usuario (integraciones de marketplace)
-    return collection(db, `artifacts/${appId}/users/${userId}/marketplace_integrations`);
-  }, [db, userId]);
-
-  // --- 3. Carga de Datos (Orders y Marketplaces) ---
-
-  useEffect(() => {
-    if (!isAuthReady || !db || !userId) return;
-
-    // Listener para Marketplaces vinculados (necesario para el select de "Agregar Pedido")
-    const marketplaceRef = getMarketplaceCollectionRef();
-    if (marketplaceRef) {
-      const unsubscribeMarketplaces = onSnapshot(marketplaceRef, (snapshot) => {
-        setLinkedMarketplaces(snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })));
-      }, (e) => console.error("Error al escuchar marketplaces:", e));
-      
-      // Listener para Pedidos
-      const orderRef = getOrderCollectionRef();
-      if (orderRef) {
-        // Se utiliza la función 'collection' importada correctamente
-        const unsubscribeOrders = onSnapshot(orderRef, (snapshot) => {
-          const fetchedOrders = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            // Asegurar que la fecha sea un objeto Date para ordenar
-            order_date: doc.data().order_date ? new Date(doc.data().order_date.seconds * 1000) : new Date(),
-          }));
-          setOrders(fetchedOrders);
-          setLoading(false);
-        }, (e) => {
-          console.error("Error al escuchar pedidos:", e);
-          setError(`Error al cargar pedidos: ${e.message}`);
-          setLoading(false);
-        });
-
-        return () => {
-          unsubscribeOrders();
-          unsubscribeMarketplaces();
-        };
-      } else {
-        setLoading(false);
-      }
-    }
-  }, [isAuthReady, db, userId, getOrderCollectionRef, getMarketplaceCollectionRef]);
-
-  // --- 4. Lógica de Filtrado y Búsqueda ---
-
-  const filteredOrders = useMemo(() => {
-    // 1. Aplicar filtro de estado
-    let currentOrders = filter === 'all' 
-      ? orders 
-      : orders.filter(order => order.status === filter);
-
-    // 2. Aplicar búsqueda
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      currentOrders = currentOrders.filter(order => 
-        (order.order_id && order.order_id.toLowerCase().includes(searchLower)) ||
-        (order.customer_name && order.customer_name.toLowerCase().includes(searchLower)) ||
-        (order.marketplace && order.marketplace.toLowerCase().includes(searchLower))
-      );
-    }
-
-    // 3. Ordenar (por fecha de pedido, más reciente primero)
-    // NOTA: Ordenar en el cliente (en memoria) para evitar errores de índice en Firestore
-    return currentOrders.sort((a, b) => b.order_date.getTime() - a.order_date.getTime());
-  }, [orders, filter, searchTerm]);
-
-  // --- 5. Funciones CRUD para Pedidos (Colaborativo) ---
-
-  const handleUpdateStatus = async (orderId, newStatus) => {
-    if (!db || !userId) return;
-    const orderDocRef = doc(db, getOrderCollectionRef().path, orderId);
-    try {
-      await updateDoc(orderDocRef, { 
-        status: newStatus,
-        updated_by: userId,
-        updated_at: new Date()
-      });
-      // Mensaje de éxito en consola o UI
-      console.log(`Estado del pedido ${orderId} actualizado a ${newStatus}`);
-    } catch (e) {
-      console.error("Error actualizando estado:", e);
-      setError(`Fallo al actualizar el estado: ${e.message}`);
-    }
-  };
-
-  const handleDeleteOrder = async (orderId) => {
-    // Usar console.log en lugar de window.confirm para entornos de CI/iFrame
-    console.log(`Solicitud de eliminación para el pedido ${orderId}. Ejecutando delete...`);
-    const orderDocRef = doc(db, getOrderCollectionRef().path, orderId);
-    try {
-      await deleteDoc(orderDocRef);
-      console.log(`Pedido ${orderId} eliminado.`);
-    } catch (e) {
-      console.error("Error eliminando pedido:", e);
-      setError(`Fallo al eliminar el pedido: ${e.message}`);
-    }
-  };
-
-  // --- 6. Componente de Adición de Pedidos (Simulación de Sincronización) ---
-
-  const AddOrderForm = () => {
-    const [isAdding, setIsAdding] = useState(false);
-    const [formData, setFormData] = useState({
-      order_id: '',
-      customer_name: '',
-      marketplace: '',
-      amount: '',
-      status: 'new',
+    // --- Estados de la Aplicación ---
+    const [db, setDb] = useState(null);
+    const [auth, setAuth] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [orders, setOrders] = useState([]);
+    const [isLoading, setIsLoading] = useState(true); // Nuevo estado de carga
+    const [error, setError] = useState(null);
+    
+    // Estado para el manejo de formularios de nueva orden
+    const [newOrder, setNewOrder] = useState({ 
+        customerName: '', 
+        item: '', 
+        quantity: 1, 
+        status: 'Pending' 
     });
 
-    const handleChange = (e) => {
-      const { name, value } = e.target;
-      setFormData(prev => ({ ...prev, [name]: value }));
+    // --- Efecto de Inicialización y Autenticación de Firebase ---
+    useEffect(() => {
+        setLogLevel('debug');
+        
+        // 1. Inicializar Firebase
+        try {
+            const app = initializeApp(firebaseConfig);
+            const firestoreDb = getFirestore(app);
+            const authInstance = getAuth(app);
+            
+            setDb(firestoreDb);
+            setAuth(authInstance);
+
+            // 2. Manejar la Autenticación
+            const handleAuth = async () => {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(authInstance, initialAuthToken);
+                        console.log("Firebase: Signed in with custom token.");
+                    } else {
+                        await signInAnonymously(authInstance);
+                        console.log("Firebase: Signed in anonymously.");
+                    }
+                } catch (e) {
+                    console.error("Firebase Auth Error:", e);
+                    setError("Error de autenticación. Ver consola para más detalles.");
+                }
+            };
+            
+            // 3. Establecer el observador de estado de autenticación
+            const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    console.log(`Firebase: User ID set to ${user.uid}`);
+                } else {
+                    setUserId(null); // Usuario desconectado
+                    console.log("Firebase: User logged out/not found.");
+                }
+                // Importante: Desactivar la pantalla de carga solo después de la primera comprobación de auth
+                setIsLoading(false);
+            });
+
+            // Iniciar el proceso de autenticación
+            handleAuth();
+            
+            // Cleanup: Desuscribirse del observador de auth al desmontar
+            return () => unsubscribe();
+            
+        } catch (e) {
+            console.error("Firebase Init Error:", e);
+            setError("Error al inicializar Firebase. Ver consola para más detalles.");
+            setIsLoading(false);
+        }
+    }, []); // Se ejecuta solo una vez al montar
+
+    // --- Efecto para Suscripción a Firestore (onSnapshot) ---
+    useEffect(() => {
+        // Ejecutar solo si Firebase y el userId están listos
+        if (!db || !userId) {
+            console.log("Firestore subscription skipped: DB or User ID not ready.");
+            return;
+        }
+
+        // Definir la ruta de la colección privada del usuario
+        // /artifacts/{appId}/users/{userId}/orders
+        const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
+        const q = query(collection(db, path));
+
+        console.log(`Firestore: Subscribing to path: ${path}`);
+        
+        // Suscripción en tiempo real a la colección
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const fetchedOrders = [];
+            querySnapshot.forEach((doc) => {
+                fetchedOrders.push({ id: doc.id, ...doc.data() });
+            });
+            // Ordenar por nombre del cliente para consistencia (en memoria)
+            fetchedOrders.sort((a, b) => a.customerName.localeCompare(b.customerName));
+            setOrders(fetchedOrders);
+            console.log("Firestore: Data updated.");
+        }, (err) => {
+            console.error("Firestore Snapshot Error:", err);
+            setError("Error de sincronización con Firestore. Ver consola.");
+        });
+
+        // Cleanup: Desuscribirse al desmontar o si cambian las dependencias
+        return () => unsubscribe();
+        
+    }, [db, userId]); // Depende de db y userId
+
+    // --- Handlers de Formulario ---
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setNewOrder(prev => ({ 
+            ...prev, 
+            [name]: name === 'quantity' ? Number(value) : value 
+        }));
     };
 
-    const handleAddOrder = async (e) => {
-      e.preventDefault();
-      if (!db || !userId) return;
+    // --- Operaciones CRUD de Firestore ---
+    
+    // 1. Agregar nueva orden
+    const addOrder = async (e) => {
+        e.preventDefault();
+        if (!db || !userId || !newOrder.customerName || !newOrder.item) return;
 
-      setIsAdding(true);
-      const newOrder = {
-        ...formData,
-        amount: parseFloat(formData.amount),
-        order_date: new Date(),
-        created_by: userId,
-        updated_by: userId,
-        source: formData.marketplace,
-        // Generar un ID simple si falta (simulación)
-        order_id: formData.order_id || `ORD-${Math.floor(Math.random() * 100000)}`,
-        // Simular ítems básicos
-        items: [{ name: "Producto X", qty: 1 }],
-      };
-
-      try {
-        await addDoc(getOrderCollectionRef(), newOrder);
-        // Limpiar formulario y mostrar éxito
-        setFormData({ order_id: '', customer_name: '', marketplace: '', amount: '', status: 'new' });
-        console.log("Pedido agregado con éxito.");
-      } catch (e) {
-        console.error("Error al agregar pedido:", e);
-        setError(`Fallo al agregar pedido: ${e.message}`);
-      } finally {
-        setIsAdding(false);
-      }
+        const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
+        
+        try {
+            await addDoc(collection(db, path), {
+                ...newOrder,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            });
+            setNewOrder({ customerName: '', item: '', quantity: 1, status: 'Pending' });
+        } catch (e) {
+            console.error("Error al agregar documento: ", e);
+            setError("Error al guardar la orden.");
+        }
     };
 
-    return (
-      <div className="p-4 bg-gray-50 rounded-lg shadow-inner">
-        <h3 className="text-xl font-bold text-gray-800 mb-4">Simular Sincronización de Nuevo Pedido</h3>
-        {linkedMarketplaces.length === 0 ? (
-          <p className="text-red-500 mb-4">
-            ⚠️ No hay Marketplaces vinculados. No se puede simular la sincronización.
-            <a href="/public/marketplace_admin_panel.html" target="_blank" className="text-blue-600 hover:underline ml-2">Vincular Marketplaces</a>.
-          </p>
-        ) : (
-          <form onSubmit={handleAddOrder} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <input type="text" name="order_id" placeholder="ID del Pedido (Ej. ML-1234)" value={formData.order_id} onChange={handleChange} required className="p-2 border border-gray-300 rounded-lg focus:ring-blue-500" />
-              <input type="text" name="customer_name" placeholder="Nombre del Cliente" value={formData.customer_name} onChange={handleChange} required className="p-2 border border-gray-300 rounded-lg focus:ring-blue-500" />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <select name="marketplace" value={formData.marketplace} onChange={handleChange} required className="p-2 border border-gray-300 rounded-lg focus:ring-blue-500">
-                    <option value="" disabled>Marketplace Origen</option>
-                    {linkedMarketplaces.map(m => (
-                        <option key={m.id} value={m.marketplace}>{m.marketplace} ({m.nickname})</option>
-                    ))}
-                </select>
-                <input type="number" name="amount" placeholder="Monto Total ($)" value={formData.amount} onChange={handleChange} required className="p-2 border border-gray-300 rounded-lg focus:ring-blue-500" />
-                <select name="status" value={formData.status} onChange={handleChange} required className="p-2 border border-gray-300 rounded-lg focus:ring-blue-500">
-                    {STATUS_OPTIONS.map(s => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
-                </select>
-            </div>
-            <button type="submit" disabled={isAdding} className={`w-full p-3 rounded-lg font-bold transition ${isAdding ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-              {isAdding ? 'Sincronizando...' : 'Simular Sincronización de Nuevo Pedido'}
-            </button>
-          </form>
-        )}
-      </div>
-    );
-  };
+    // 2. Actualizar el estado de una orden
+    const updateOrderStatus = async (id, newStatus) => {
+        if (!db || !userId) return;
 
-  // --- 7. Renderizado Principal ---
+        const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
+        const docRef = doc(db, path, id);
 
-  if (loading || !isAuthReady) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-center">
-          <svg className="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="mt-4 text-lg text-gray-600">Cargando dashboard y autenticando...</p>
-        </div>
-      </div>
-    );
-  }
+        try {
+            await updateDoc(docRef, { 
+                status: newStatus,
+                updatedAt: new Date().toISOString(),
+            });
+        } catch (e) {
+            console.error("Error al actualizar documento: ", e);
+            setError("Error al actualizar el estado de la orden.");
+        }
+    };
 
-  if (error) {
-    return (
-      <div className="p-6 bg-red-100 border-l-4 border-red-500 text-red-700 min-h-screen">
-        <p className="font-bold">Error Crítico:</p>
-        <p>{error}</p>
-        <p className="mt-4 text-sm text-red-500">Si el error persiste, revise la configuración de Firebase y los logs de la consola.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8">
-      <header className="mb-6 bg-white p-4 rounded-xl shadow-lg flex justify-between items-center flex-wrap">
-        <h1 className="text-3xl font-extrabold text-gray-900">Dashboard de Despacho Colaborativo</h1>
-        <div className="text-sm text-gray-600 mt-2 sm:mt-0">
-          <p className="font-semibold">ID de Usuario: <span className="text-blue-600">{userId || 'Anónimo'}</span></p>
-          <p>Marketplaces Vinculados: <span className="font-bold text-green-600">{linkedMarketplaces.length}</span></p>
-        </div>
-      </header>
-
-      {/* Formulario de Adición de Pedido */}
-      <AddOrderForm />
-
-      {/* Controles de Filtrado y Búsqueda */}
-      <div className="mt-6 p-4 bg-white rounded-xl shadow-lg flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
-        <input 
-          type="text" 
-          placeholder="Buscar por ID, Cliente o Marketplace..." 
-          value={searchTerm} 
-          onChange={(e) => setSearchTerm(e.target.value)} 
-          className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-blue-500"
-        />
+    // 3. Eliminar una orden
+    const deleteOrder = async (id) => {
+        if (!db || !userId) return;
         
-        <select 
-          value={filter} 
-          onChange={(e) => setFilter(e.target.value)} 
-          className="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 min-w-[200px]"
-        >
-          <option value="all">Todos los Estados ({orders.length})</option>
-          {STATUS_OPTIONS.map(s => (
-            <option key={s.value} value={s.value}>
-              {s.label} ({orders.filter(o => o.status === s.value).length})
-            </option>
-          ))}
-        </select>
-      </div>
+        const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
+        const docRef = doc(db, path, id);
 
-      {/* Lista de Pedidos */}
-      <main className="mt-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Pedidos Pendientes ({filteredOrders.length})</h2>
-        
-        {filteredOrders.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-xl shadow-lg border-2 border-dashed border-gray-300">
-            <p className="text-lg text-gray-600">No hay pedidos que coincidan con los filtros aplicados.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredOrders.map(order => (
-              <div key={order.id} className="bg-white p-4 rounded-xl shadow-md hover:shadow-lg transition flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-3 lg:space-y-0">
-                
-                {/* Detalles del Pedido */}
-                <div className="flex-1 min-w-0 pr-4">
-                  <p className="text-lg font-extrabold text-gray-900 truncate">
-                    {getStatusDetails(order.status).icon} {order.order_id} 
-                    <span className="text-sm font-medium text-blue-600 ml-2">({order.marketplace})</span>
-                  </p>
-                  <p className="text-gray-700 font-semibold mt-1">
-                    Cliente: {order.customer_name}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Monto: <span className="font-bold text-green-600">${order.amount?.toFixed(2) || 'N/A'}</span> | 
-                    Fecha: {order.order_date.toLocaleDateString()}
-                  </p>
+        try {
+            await deleteDoc(docRef);
+        } catch (e) {
+            console.error("Error al eliminar documento: ", e);
+            setError("Error al eliminar la orden.");
+        }
+    };
+
+    // --- Renderizado Condicional: Pantalla de Carga/Error ---
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white p-4">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-400 mx-auto"></div>
+                    <p className="mt-4 text-xl font-semibold">Cargando aplicación y autenticando...</p>
+                    <p className="text-sm text-gray-400 mt-2">Esto puede tomar un momento mientras se conecta a Firebase.</p>
                 </div>
-                
-                {/* Controles de Estado y Acción */}
-                <div className="flex flex-col sm:flex-row items-stretch lg:items-center space-y-2 sm:space-y-0 sm:space-x-3 w-full lg:w-auto">
-                  
-                  {/* Selector de Estado */}
-                  <select
-                    value={order.status}
-                    onChange={(e) => handleUpdateStatus(order.id, e.target.value)}
-                    className={`p-2 border border-gray-300 rounded-lg font-semibold w-full sm:w-auto ${getStatusDetails(order.status).color} text-white transition duration-200`}
-                  >
-                    {STATUS_OPTIONS.map(s => (
-                      <option key={s.value} value={s.value} className="bg-white text-gray-900">
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  {/* Botón de Eliminar */}
-                  <button
-                    onClick={() => handleDeleteOrder(order.id)}
-                    className="p-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition w-full sm:w-auto flex items-center justify-center"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                  </button>
+            </div>
+        );
+    }
+    
+    if (error) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-red-900 text-white p-4">
+                <div className="text-center p-6 bg-red-800 rounded-xl shadow-2xl">
+                    <h1 className="text-2xl font-bold mb-4">¡Error Crítico!</h1>
+                    <p className="mb-4">No se pudo inicializar la aplicación o autenticar el usuario.</p>
+                    <p className="font-mono text-sm break-all">{error}</p>
+                    <p className="mt-4 text-sm">Verifique la consola del navegador o los logs del dispositivo para detalles.</p>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
+            </div>
+        );
+    }
 
-      {/* Enlace al Panel de Integración */}
-      <footer className="mt-8 text-center">
-        <a href="/public/marketplace_admin_panel.html" target="_blank" className="text-sm text-gray-600 hover:text-blue-600 hover:underline transition">
-          Configurar Marketplaces Vinculados (Abrir Panel de Administración)
-        </a>
-      </footer>
-    </div>
-  );
+    // --- Componente de Tarjeta de Orden ---
+    const OrderCard = ({ order }) => {
+        // Lógica de color basada en el estado
+        let statusColor = 'bg-gray-500';
+        let buttonText = 'Mark as Processing';
+        let nextStatus = 'Processing';
+
+        switch (order.status) {
+            case 'Pending':
+                statusColor = 'bg-yellow-500';
+                buttonText = 'Marcar en Proceso';
+                nextStatus = 'Processing';
+                break;
+            case 'Processing':
+                statusColor = 'bg-blue-500';
+                buttonText = 'Marcar como Enviado';
+                nextStatus = 'Shipped';
+                break;
+            case 'Shipped':
+                statusColor = 'bg-green-500';
+                buttonText = 'Marcar como Entregado';
+                nextStatus = 'Delivered';
+                break;
+            case 'Delivered':
+                statusColor = 'bg-green-700';
+                buttonText = 'Completado';
+                nextStatus = 'Delivered'; // No cambia más
+                break;
+            default:
+                break;
+        }
+
+        const canAdvanceStatus = order.status !== 'Delivered';
+
+        return (
+            <div className="bg-white p-4 rounded-lg shadow-xl border-t-4 border-gray-200 flex flex-col justify-between h-full">
+                <div>
+                    <div className="flex justify-between items-start mb-2">
+                        <h3 className="text-xl font-bold text-gray-800 break-words pr-2">{order.customerName}</h3>
+                        <span className={`px-3 py-1 text-xs font-semibold text-white rounded-full ${statusColor}`}>
+                            {order.status}
+                        </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1">
+                        <span className="font-medium">Artículo:</span> {order.item}
+                    </p>
+                    <p className="text-sm text-gray-600 mb-4">
+                        <span className="font-medium">Cantidad:</span> {order.quantity}
+                    </p>
+                </div>
+
+                <div className="mt-auto">
+                    {canAdvanceStatus && (
+                        <button
+                            onClick={() => updateOrderStatus(order.id, nextStatus)}
+                            className="w-full mb-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+                        >
+                            {buttonText}
+                        </button>
+                    )}
+                    {!canAdvanceStatus && (
+                        <div className="w-full text-center text-sm py-2 px-4 text-green-700 bg-green-100 rounded-lg mb-2">
+                            Orden completada.
+                        </div>
+                    )}
+                    <button
+                        onClick={() => deleteOrder(order.id)}
+                        className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 text-sm"
+                    >
+                        Eliminar Orden
+                    </button>
+                </div>
+            </div>
+        );
+    };
+
+
+    // --- Renderizado Principal (Dashboard) ---
+    return (
+        <div className="min-h-screen bg-gray-100 p-4 sm:p-6 md:p-8">
+            <header className="mb-8 text-center">
+                <h1 className="text-4xl font-extrabold text-gray-900 mb-2">Panel de Gestión de Órdenes</h1>
+                <p className="text-gray-600 text-lg">
+                    App ID: <span className="font-mono bg-gray-200 px-2 py-0.5 rounded text-sm">{appId}</span>
+                </p>
+                <p className="text-gray-600 text-lg">
+                    User ID: <span className="font-mono bg-gray-200 px-2 py-0.5 rounded text-sm">{userId || 'N/A'}</span>
+                </p>
+            </header>
+
+            {/* Formulario para Añadir Orden */}
+            <div className="max-w-4xl mx-auto bg-white p-6 rounded-xl shadow-2xl mb-8">
+                <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Añadir Nueva Orden</h2>
+                <form onSubmit={addOrder} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <input
+                        type="text"
+                        name="customerName"
+                        value={newOrder.customerName}
+                        onChange={handleInputChange}
+                        placeholder="Nombre del Cliente"
+                        required
+                        className="col-span-4 md:col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <input
+                        type="text"
+                        name="item"
+                        value={newOrder.item}
+                        onChange={handleInputChange}
+                        placeholder="Artículo del Pedido"
+                        required
+                        className="col-span-4 md:col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <input
+                        type="number"
+                        name="quantity"
+                        value={newOrder.quantity}
+                        onChange={handleInputChange}
+                        min="1"
+                        placeholder="Cantidad"
+                        required
+                        className="col-span-2 md:col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!newOrder.customerName || !newOrder.item}
+                        className="col-span-2 md:col-span-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 disabled:bg-green-300"
+                    >
+                        Crear Orden
+                    </button>
+                </form>
+            </div>
+
+            {/* Lista de Órdenes */}
+            <section className="max-w-6xl mx-auto">
+                <h2 className="text-3xl font-bold text-gray-800 mb-6">Órdenes Activas ({orders.length})</h2>
+                {orders.length === 0 ? (
+                    <div className="text-center p-10 bg-white rounded-xl shadow-md">
+                        <p className="text-xl text-gray-500">No hay órdenes pendientes. ¡Añade una nueva!</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {orders.map(order => (
+                            <OrderCard key={order.id} order={order} />
+                        ))}
+                    </div>
+                )}
+            </section>
+        </div>
+    );
 };
 
 export default App;
+
+              
