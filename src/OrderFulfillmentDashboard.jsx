@@ -1,3 +1,4 @@
+/* global __app_id, __firebase_config, __initial_auth_token */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
