@@ -1,0 +1,6 @@
+{
+  "appId": "com.multimarket.pro",
+  "appName": "MultiMarket Pro V2",
+  "webDir": "build",
+  "bundledWebRuntime": false
+}
