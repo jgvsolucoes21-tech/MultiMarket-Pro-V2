@@ -62,12 +62,11 @@ const appId =
         ? window.__app_id 
         : 'default-app-id';
 
-// *IMPORTANTE: Añadir un objeto vacío como fallback para que la app inicie
-// cuando se compila en un APK sin la configuración de Firebase inyectada.*
+// Fallback: Objeto vacío para que la app no falle al iniciar en modo APK
 const firebaseConfig = 
     typeof window !== 'undefined' && typeof window.__firebase_config !== 'undefined'
         ? JSON.parse(window.__firebase_config)
-        : {}; // Fallback: Objeto vacío para que la app no falle al iniciar
+        : {}; 
 
 const initialAuthToken = 
     typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined'
@@ -86,7 +85,7 @@ const App = () => {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true); 
     const [error, setError] = useState(null);
-    const [isFirebaseReady, setIsFirebaseReady] = useState(false); // Nuevo estado de control
+    const [isFirebaseReady, setIsFirebaseReady] = useState(false); 
     
     // Estado para el manejo de formularios de nueva orden
     const [newOrder, setNewOrder] = useState({ 
@@ -104,11 +103,11 @@ const App = () => {
                               firebaseConfig.projectId;
 
         if (!isConfigValid) {
-            // Este bloque se ejecuta cuando se compila el APK
+            // Se ejecuta cuando se compila el APK sin la config
             console.warn("Firebase: Configuración ausente. La base de datos no estará activa.");
             setError("Modo Offline: Base de datos no disponible. La app iniciará, pero las funciones de DB no funcionarán.");
             setIsLoading(false);
-            setIsFirebaseReady(false); // Marca Firebase como NO listo
+            setIsFirebaseReady(false); 
             return;
         }
         
@@ -145,7 +144,7 @@ const App = () => {
                     setUserId(null); 
                     console.log("Firebase: User logged out/not found.");
                 }
-                setIsFirebaseReady(true); // Marca Firebase como listo
+                setIsFirebaseReady(true); 
                 setIsLoading(false);
             });
 
@@ -159,7 +158,7 @@ const App = () => {
             setIsLoading(false);
             setIsFirebaseReady(false);
         }
-    }, []); // Se ejecuta solo una vez al montar
+    }, []); 
 
     // --- Efecto para Suscripción a Firestore (onSnapshot) ---
     useEffect(() => {
@@ -184,20 +183,19 @@ const App = () => {
             console.log("Firestore: Data updated.");
         }, (err) => {
             console.error("Firestore Snapshot Error:", err);
-            // No sobrescribir errores críticos anteriores, pero registrar este.
             if (isFirebaseReady) {
-                // Solo registramos errores de snapshot si pensamos que DB debería estar funcionando
                 console.error("Error de sincronización con Firestore.");
             }
         });
 
         return () => unsubscribe();
         
-    }, [db, userId, isFirebaseReady]); // Depende de db, userId, y si Firebase se inicializó con éxito
+    }, [db, userId, isFirebaseReady]); 
 
     // --- Handlers de Formulario y Operaciones CRUD ---
     const checkDbStatus = () => {
         if (!isFirebaseReady) {
+            // Usamos alert para notificar que la funcionalidad está bloqueada en este modo.
             alert("FUNCIÓN BLOQUEADA: La base de datos no está disponible. Este modo ocurre al ejecutar el APK sin configurar Firebase.");
             return false;
         }
@@ -227,7 +225,6 @@ const App = () => {
             setNewOrder({ customerName: '', item: '', quantity: 1, status: 'Pending' });
         } catch (e) {
             console.error("Error al agregar documento: ", e);
-            // Reemplazar alert() con un modal/mensaje custom si fuera necesario
             alert("Error al guardar la orden. Ver consola."); 
         }
     };
@@ -266,7 +263,6 @@ const App = () => {
 
     // --- Renderizado Condicional: PANTALLA DE CARGA PERSONALIZADA (Splash) ---
     if (isLoading) {
-        // Estilos para replicar el color turquesa (#21B3A9) y el diseño centrado de la imagen
         return (
             <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#21B3A9' }}>
                 <div className="text-center p-4">
@@ -464,4 +460,11 @@ const App = () => {
                         ))}
                     </div>
                 )}
-    
+            </section>
+        </div>
+    );
+};
+
+export default App;
+
+        
