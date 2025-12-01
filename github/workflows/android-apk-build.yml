@@ -2,7 +2,7 @@
 
 name: Build Android APK (Capacitor)
 
-# El workflow se ejecuta cuando se hace un push a la rama 'main' o manualmente
+# El workflow se ejecuta cuando se hace un push a la rama 'main' o manualmente 
 on:
   push:
     branches:
