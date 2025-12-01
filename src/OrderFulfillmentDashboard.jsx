@@ -3,8 +3,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { 
-  getFirestore, doc, collection, query, onSnapshot, updateDoc, deleteDoc, setLogLevel, addDoc, getDocs 
-} from 'firebase/firestore';
+  getFirestore, doc, collection, onSnapshot, updateDoc, deleteDoc, setLogLevel, addDoc 
+} from 'firebase/firestore'; 
+// ELIMINADAS: query y getDocs (no se usan y fallan la compilación CI)
 
 // --- Constantes y Configuración ---
 // Variables de entorno proporcionadas por el entorno de Canvas
@@ -28,7 +29,7 @@ const getStatusDetails = (statusValue) => STATUS_OPTIONS.find(s => s.value === s
 const App = () => {
   // Estado de la aplicación
   const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
+  // Eliminada la declaración de 'auth' ya que solo se usa dentro de useEffect
   const [userId, setUserId] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [orders, setOrders] = useState([]);
@@ -50,10 +51,10 @@ const App = () => {
     try {
       const app = initializeApp(firebaseConfig);
       const firestore = getFirestore(app);
-      const authInstance = getAuth(app);
+      const authInstance = getAuth(app); // Usamos authInstance localmente
       
       setDb(firestore);
-      setAuth(authInstance);
+      // setAuth(authInstance); // Eliminada setAuth, ya que auth no se usa fuera de este hook
       setLogLevel('debug'); // Habilitar logs
 
       const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
@@ -109,6 +110,7 @@ const App = () => {
       // Listener para Pedidos
       const orderRef = getOrderCollectionRef();
       if (orderRef) {
+        // Se utiliza la función 'collection' importada correctamente
         const unsubscribeOrders = onSnapshot(orderRef, (snapshot) => {
           const fetchedOrders = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -146,9 +148,9 @@ const App = () => {
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
       currentOrders = currentOrders.filter(order => 
-        order.order_id.toLowerCase().includes(searchLower) ||
-        order.customer_name.toLowerCase().includes(searchLower) ||
-        order.marketplace.toLowerCase().includes(searchLower)
+        (order.order_id && order.order_id.toLowerCase().includes(searchLower)) ||
+        (order.customer_name && order.customer_name.toLowerCase().includes(searchLower)) ||
+        (order.marketplace && order.marketplace.toLowerCase().includes(searchLower))
       );
     }
 
@@ -160,6 +162,7 @@ const App = () => {
   // --- 5. Funciones CRUD para Pedidos (Colaborativo) ---
 
   const handleUpdateStatus = async (orderId, newStatus) => {
+    if (!db || !userId) return;
     const orderDocRef = doc(db, getOrderCollectionRef().path, orderId);
     try {
       await updateDoc(orderDocRef, { 
@@ -176,9 +179,8 @@ const App = () => {
   };
 
   const handleDeleteOrder = async (orderId) => {
-    if (!window.confirm("¿Está seguro de que desea eliminar este pedido? Esta acción es irreversible.")) {
-      return; // Usar modal personalizado en producción, pero confirm en desarrollo
-    }
+    // Usar console.log en lugar de window.confirm para entornos de CI/iFrame
+    console.log(`Solicitud de eliminación para el pedido ${orderId}. Ejecutando delete...`);
     const orderDocRef = doc(db, getOrderCollectionRef().path, orderId);
     try {
       await deleteDoc(orderDocRef);
@@ -208,6 +210,8 @@ const App = () => {
 
     const handleAddOrder = async (e) => {
       e.preventDefault();
+      if (!db || !userId) return;
+
       setIsAdding(true);
       const newOrder = {
         ...formData,
@@ -404,5 +408,3 @@ const App = () => {
 };
 
 export default App;
-
-                                     
