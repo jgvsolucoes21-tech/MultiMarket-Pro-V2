@@ -2,12 +2,13 @@
 
 name: Build Android APK (Capacitor)
 
-# El workflow se ejecuta cuando se hace un push a la rama 'master' o manualmente
+# El workflow se ejecuta cuando se hace un push a la rama 'main' o manualmente
 on:
   push:
     branches:
-      - master
-  workflow_dispatch:
+      - main
+      - master # Acepta 'master' por si es el nombre de su rama
+  workflow_dispatch: # Permite ejecutar el workflow manualmente desde la interfaz de GitHub
 
 # Permisos para el CI/CD
 permissions:
@@ -15,6 +16,7 @@ permissions:
 
 jobs:
   build_apk:
+    # Se ejecuta en un sistema Ubuntu
     runs-on: ubuntu-latest
     steps:
       # 1. Checkout del código
@@ -26,9 +28,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20' 
-          cache: 'npm' # Habilitar caché para acelerar el proceso
+          cache: 'npm' 
 
-      # 3. Instalación de Dependencias
+      # 3. Instalación de Dependencias (Basado en package.json)
       - name: Install Dependencies
         run: npm install
 
@@ -37,30 +39,32 @@ jobs:
       - name: Run Web Build
         run: npm run build
 
-      # 5. Instalación de Capacitor (CLI y dependencias Android)
+      # 5. Instalación de Capacitor (CLI)
       - name: Install Capacitor Core and CLI
         run: npm install @capacitor/cli @capacitor/core
-
-      # 6. Añadir la Plataforma Android si aún no existe
-      # Esto solo se hace una vez, pero es seguro ejecutarlo
-      - name: Add Android Platform
-        run: npx cap add android || echo "Android platform already added or not required on CI."
-        # Capacitor necesita que la carpeta 'android' esté presente.
+        
+      # 6. Crear la Carpeta Nativa Android (Capacitor)
+      # Este paso es CRÍTICO. Ejecutamos 'cap add android' y forzamos la creación.
+      # Usamos '|| true' para que el workflow no falle si la carpeta ya existía.
+      - name: Add Android Platform (Critical Step)
+        run: npx cap add android || true 
         
       # 7. Sincronizar el Build Web con el Proyecto Android Nativo
+      # Mueve los archivos de 'build/' a 'android/app/src/main/assets/public'
       - name: Sync Web Assets to Android Project
         run: npx cap sync android
 
       # 8. Configurar el SDK de Android
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      # 9. Construcción del Proyecto Android
+        
+      # 9. Construcción del Proyecto Android con Gradle
+      # Se genera el archivo app-debug.apk
       - name: Build Android Debug APK
         run: cd android && ./gradlew assembleDebug
 
       # 10. Archivar y Subir el APK
-      # El APK compilado se encuentra en android/app/build/outputs/apk/debug/
+      # El APK se guarda como un Artefacto descargable en GitHub
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
