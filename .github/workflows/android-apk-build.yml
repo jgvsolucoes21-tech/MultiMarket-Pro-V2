@@ -15,15 +15,6 @@ permissions:
 jobs:
   build_apk:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20' 
-          cache: 'npm' 
 
       # 3. Instalación de Dependencias (Ahora incluye Capacitor CLI)
       - name: Install All Dependencies (including Capacitor)
