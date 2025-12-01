@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Marketplaces</title>
+    <!-- Carga de Tailwind CSS para estilos modernos y responsivos -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+            min-height: 100vh;
+        }
+        .main-card {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 2rem;
+        }
+        .linked-card {
+            transition: all 0.2s;
+            border-left: 4px solid #10b981; /* Borde de estado vinculado */
+        }
+        .linked-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        /* Estilos responsivos */
+        @media (max-width: 640px) {
+            .main-card {
+                margin: 0;
+                border-radius: 0;
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="main-card bg-white rounded-xl shadow-2xl transition-all duration-300">
+    <!-- Pantalla de Carga/Mensajes -->
+    <div id="loading-screen" class="flex flex-col items-center justify-center py-12">
+        <svg class="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="mt-4 text-gray-600">Cargando integraciones de Marketplace...</p>
+    </div>
+
+    <div id="content" class="hidden">
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">Integraciones de Marketplaces</h1>
+        <p class="text-gray-600 mb-8" id="subtitle-text">Administre sus cuentas vinculadas y añada nuevas integraciones.</p>
+        
+        <!-- Contenedor principal para cambiar entre vistas -->
+        <div id="view-container">
+            <!-- Contenido de la vista (lista o formulario) se inyecta aquí -->
+        </div>
+    </div>
+
+    <!-- Contenedor del Modal/Mensaje -->
+    <div id="message-box" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-96 max-w-full">
+            <h3 id="msg-title" class="font-bold text-xl mb-3 text-red-600">Mensaje</h3>
+            <p id="msg-body" class="text-gray-700 mb-4"></p>
+            <div class="flex justify-end space-x-3">
+                <button id="modal-cancel" onclick="closeMessageBox()" class="bg-gray-200 text-gray-700 p-2 rounded-lg font-semibold hover:bg-gray-300 transition hidden">Cancelar</button>
+                <button id="modal-confirm" onclick="closeMessageBox()" class="bg-blue-600 text-white p-2 rounded-lg font-semibold hover:bg-blue-700 transition">Entendido</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // Importación de las librerías de Firebase
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { 
+        getFirestore, doc, collection, query, onSnapshot, addDoc, deleteDoc, setLogLevel 
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Variables de Entorno Proporcionadas por Canvas ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    // --- Variables Globales ---
+    let db;
+    let auth;
+    let userId = null;
+    let linkedAccounts = []; // Array de cuentas de marketplace vinculadas
+    let currentView = 'list'; // 'list' o 'add'
+    
+    // Lista de Marketplaces soportados
+    const MARKETPLACES = ['Amazon', 'Mercadolivre', 'Shopee', 'Aliexpress', 'Shopify'];
+
+    // --- UI Helpers (Cajas de Mensajes) ---
+    function showMessageBox(title, message, isError = true, showConfirmation = false, onConfirm = null) {
+        document.getElementById('msg-title').textContent = title;
+        document.getElementById('msg-body').textContent = message;
+        document.getElementById('msg-title').className = `font-bold text-xl mb-3 ${isError ? 'text-red-600' : 'text-blue-600'}`;
+        
+        const confirmButton = document.getElementById('modal-confirm');
+        const cancelButton = document.getElementById('modal-cancel');
+        
+        if (showConfirmation && onConfirm) {
+            cancelButton.classList.remove('hidden');
+            confirmButton.textContent = 'Confirmar';
+            confirmButton.onclick = () => { onConfirm(); closeMessageBox(); };
+        } else {
+            cancelButton.classList.add('hidden');
+            confirmButton.textContent = 'Entendido';
+            confirmButton.onclick = closeMessageBox;
+        }
+
+        document.getElementById('message-box').classList.remove('hidden');
+        document.getElementById('message-box').classList.add('flex');
+    }
+
+    window.closeMessageBox = () => {
+        document.getElementById('message-box').classList.add('hidden');
+        document.getElementById('message-box').classList.remove('flex');
+    }
+
+    // --- Lógica de Firebase y Autenticación ---
+    async function setupFirebase() {
+        if (!firebaseConfig) {
+            console.error("Firebase config is missing.");
+            showMessageBox("Error de Configuración", "No se pudo inicializar Firebase. Verifique la configuración.", true);
+            return;
+        }
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            setLogLevel('debug'); // Habilitar logs para depuración
+
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            userId = auth.currentUser?.uid || 'anonymous';
+            console.log(`Firebase inicializado. Admin UserID: ${userId}`);
+
+            setupIntegrationListener();
+
+        } catch (error) {
+            console.error("Error al configurar Firebase:", error);
+            showMessageBox("Error de Conexión", `Fallo al iniciar sesión o conectar: ${error.message}`, true);
+        }
+    }
+
+    // --- Firestore Listeners y Rutas ---
+
+    function getIntegrationCollectionRef() {
+        return collection(db, `artifacts/${appId}/users/${userId}/marketplace_integrations`);
+    }
+
+    function setupIntegrationListener() {
+        const q = query(getIntegrationCollectionRef());
+        
+        onSnapshot(q, (snapshot) => {
+            linkedAccounts = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            // Actualizar la vista cada vez que los datos cambian
+            if (currentView === 'list') {
+                renderListView();
+            }
+            // Ocultar carga inicial
+            document.getElementById('loading-screen').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+        }, (error) => {
+            console.error("Error al escuchar integraciones:", error);
+        });
+    }
+
+    // --- Lógica de Vistas (Pasos 2, 3) ---
+
+    window.changeView = (view) => {
+        currentView = view;
+        document.getElementById('subtitle-text').textContent = 
+            view === 'list' ? 'Administre sus cuentas vinculadas y añada nuevas integraciones.' : 'Seleccione y vincule una nueva cuenta de Marketplace.';
+        
+        if (view === 'list') {
+            renderListView();
+        } else if (view === 'add') {
+            renderAddView();
+        }
+    }
+
+    function renderListView() {
+        const container = document.getElementById('view-container');
+        
+        if (linkedAccounts.length === 0) {
+            // Caso 3: No hay marketplaces vinculados (Empty State)
+            container.innerHTML = `
+                <div class="text-center py-16 px-4 bg-gray-50 rounded-xl border-dashed border-2 border-gray-300">
+                    <svg class="w-12 h-12 mx-auto text-blue-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h.01M3 14h.01M3 18h.01M16 16v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-3m17-3v-3a2 2 0 00-2-2h-3M18 10h.01M18 14h.01"></path></svg>
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">Aún no hay Marketplaces vinculados</h2>
+                    <p class="text-gray-600 mb-6">Comience a integrar su negocio haciendo clic en el botón de abajo.</p>
+                    <button onclick="changeView('add')" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-lg">
+                        Vincular Nueva Cuenta
+                    </button>
+                </div>
+            `;
+        } else {
+            // Caso 2: Marketplaces vinculados
+            let listHtml = linkedAccounts.map(account => `
+                <div class="linked-card p-4 bg-white shadow-md rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-2 sm:space-y-0 mb-3">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-lg font-bold text-gray-800">${account.marketplace} - <span class="text-blue-600">${account.nickname}</span></p>
+                        <p class="text-sm text-gray-500 truncate">Token Simulado: ${account.auth_token_sim.substring(0, 20)}...</p>
+                        <p class="text-xs text-green-700 font-medium">Vinculado desde: ${new Date(account.linked_on.seconds * 1000).toLocaleDateString()}</p>
+                    </div>
+                    <div class="flex space-x-2 mt-2 sm:mt-0">
+                        <button onclick="showUpdateModal('${account.id}', '${account.marketplace}', '${account.nickname}')" 
+                                class="p-2 text-sm rounded-lg font-medium bg-yellow-500 text-white hover:bg-yellow-600 transition">
+                            Actualizar Credenciales
+                        </button>
+                        <button onclick="unlinkAccount('${account.id}', '${account.nickname}')" 
+                                class="p-2 text-sm rounded-lg font-medium bg-red-500 text-white hover:bg-red-600 transition">
+                            Desvincular
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div id="marketplace-linked-list" class="mb-6">
+                    ${listHtml}
+                </div>
+                <!-- Opción para vincular nueva cuenta al final de la lista -->
+                <button onclick="changeView('add')" class="w-full border-2 border-dashed border-gray-400 text-gray-700 p-4 rounded-lg font-semibold hover:bg-gray-100 transition">
+                    + Vincular Nueva Cuenta de Marketplace
+                </button>
+            `;
+        }
+    }
+
+    // --- Lógica de Vistas (Paso 4: Vinculación) ---
+
+    function renderAddView() {
+        const container = document.getElementById('view-container');
+        const optionsHtml = MARKETPLACES.map(m => `<option value="${m}">${m}</option>`).join('');
+
+        container.innerHTML = `
+            <div class="bg-gray-50 p-6 rounded-xl shadow-inner">
+                <button onclick="changeView('list')" class="text-blue-600 hover:text-blue-800 mb-4 font-medium flex items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                    Volver a la Lista
+                </button>
+                <h3 class="text-2xl font-bold text-gray-800 mb-5">Seleccione y Vincule su Marketplace</h3>
+                <p class="text-sm text-gray-500 mb-4">El proceso de vinculación requiere redirigir al sitio para autenticación (OAuth). </p>
+
+                <div class="space-y-4">
+                    <!-- Selección de Marketplace -->
+                    <div>
+                        <label for="new-marketplace" class="block text-sm font-medium text-gray-700">Marketplace</label>
+                        <select id="new-marketplace" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            <option value="" disabled selected>-- Seleccionar Marketplace --</option>
+                            ${optionsHtml}
+                        </select>
+                    </div>
+
+                    <!-- Nickname (Paso 5) -->
+                    <div>
+                        <label for="account-nickname" class="block text-sm font-medium text-gray-700">Nickname de la Cuenta (Ej. "Mercadolibre Cuenta Premium")</label>
+                        <input type="text" id="account-nickname" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500" placeholder="Escriba un nombre para identificar esta cuenta">
+                    </div>
+
+                    <!-- Credenciales (Simuladas) -->
+                    <div>
+                        <label for="api-key" class="block text-sm font-medium text-gray-700">Usuario / API Key (Simulado)</label>
+                        <input type="text" id="api-key" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500" placeholder="Usuario o ID de acceso">
+                    </div>
+                    <div>
+                        <label for="api-secret" class="block text-sm font-medium text-gray-700">Contraseña / API Secret (Simulado)</label>
+                        <input type="password" id="api-secret" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500" placeholder="Contraseña o clave secreta">
+                    </div>
+                </div>
+
+                <button onclick="linkNewAccount()" class="w-full mt-6 bg-green-600 text-white p-3 rounded-lg font-bold hover:bg-green-700 transition shadow-lg">
+                    Vincular Cuenta y Autorizar Permisos
+                </button>
+            </div>
+        `;
+    }
+
+    // --- Lógica de CRUD (Operaciones de Cuentas) ---
+
+    window.linkNewAccount = async () => {
+        const marketplace = document.getElementById('new-marketplace').value;
+        const nickname = document.getElementById('account-nickname').value.trim();
+        const apiKey = document.getElementById('api-key').value.trim();
+        const apiSecret = document.getElementById('api-secret').value.trim();
+
+        if (!marketplace || !nickname || !apiKey || !apiSecret) {
+            showMessageBox("Campos Requeridos", "Debe seleccionar un Marketplace, ingresar un Nickname y las credenciales.", true);
+            return;
+        }
+
+        // Simulación del proceso de redirección y autorización (OAuth)
+        showMessageBox("Proceso de Vinculación", 
+            `Simulando redirección a ${marketplace} para la autenticación y solicitud de permisos...`, 
+            false, false);
+        
+        // Simulación de espera y obtención del token de acceso
+        setTimeout(async () => {
+            const fakeToken = `ACCESSTOKEN_${marketplace.toUpperCase()}_${new Date().getTime()}`;
+            try {
+                await addDoc(getIntegrationCollectionRef(), {
+                    marketplace: marketplace,
+                    nickname: nickname,
+                    status: 'Linked',
+                    auth_token_sim: fakeToken, // Token real se obtendría aquí
+                    linked_on: { seconds: Math.floor(Date.now() / 1000) }, // Firestore timestamp format
+                    // Permisos solicitados:
+                    permissions: ['notifications', 'sales_details', 'label_nfe_import'] 
+                });
+                
+                showMessageBox("¡Vinculación Exitosa!", 
+                    `La cuenta "${nickname}" de ${marketplace} ha sido vinculada y autorizada con éxito.`, 
+                    false);
+                changeView('list'); // Volver a la lista después de vincular
+            } catch (e) {
+                showMessageBox("Error de Vinculación", `Fallo al guardar la integración: ${e.message}`, true);
+            }
+        }, 2000);
+    }
+
+    window.unlinkAccount = (docId, nickname) => {
+        showMessageBox("Confirmar Desvinculación", 
+            `¿Está seguro de que desea desvincular la cuenta "${nickname}"? Esto revocará los permisos de la aplicación.`, 
+            true, true, async () => {
+            try {
+                await deleteDoc(doc(db, getIntegrationCollectionRef().path, docId));
+                showMessageBox("Desvinculado", `La cuenta "${nickname}" ha sido desvinculada.`, false);
+            } catch (e) {
+                showMessageBox("Error", `No se pudo desvincular la cuenta: ${e.message}`, true);
+            }
+        });
+    }
+
+    window.showUpdateModal = (docId, marketplace, nickname) => {
+        // En un flujo real, esto abriría un modal para ingresar nuevas credenciales
+        showMessageBox("Actualizar Credenciales (Simulación)", 
+            `Esta función redirigiría a la página de ${marketplace} para que inicie sesión nuevamente y actualice los permisos o credenciales para la cuenta "${nickname}".`, 
+            false, false);
+        // Implementación real usaría updateDoc(docRef, { new_token: '...' }) después de la re-autenticación.
+    }
+
+    // --- Inicialización ---
+    window.onload = setupFirebase;
+
+</script>
+</body>
+</html>
+
+  
