@@ -1,19 +1,40 @@
 {
-  "name": "MultiMarket-Pro V2",
-  "version": "1.0.0",
+  "name": "multi-market-pro-v2",
+  "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "firebase": "^11.6.1"
+    "@capacitor/core": "6.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "postinstall": "npx cap sync"  <-- ¡AQUÍ ESTÁ LA LÍNEA!
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   },
   "devDependencies": {
-    "react-scripts": "^5.0.1"
+    "@capacitor/cli": "6.0.0",
+    "react-scripts": "5.0.1",
+    "tailwindcss": "^3.4.4"
   }
 }
