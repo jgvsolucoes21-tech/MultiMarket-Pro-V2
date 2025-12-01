@@ -1,4 +1,5 @@
-# Workflow para construir y empaquetar una aplicación Capacitor Android (.apk) - Intento simplificado
+# Este workflow automatiza la compilación de un APK de debug
+# para una aplicación basada en React/Node.js usando Capacitor.
 
 name: Build Android APK (Capacitor)
 
@@ -7,6 +8,7 @@ on:
     branches:
       - main
       - master 
+  # Permite ejecutar el workflow manualmente desde la interfaz de GitHub
   workflow_dispatch: 
 
 permissions:
@@ -15,33 +17,44 @@ permissions:
 jobs:
   build_apk:
     runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Checkout: Clona el código del repositorio en el servidor de GitHub
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # 3. Instalación de Dependencias (Ahora incluye Capacitor CLI)
-      - name: Install All Dependencies (including Capacitor)
+      # 2. Setup Node.js: Configura el ambiente de Node necesario para npm
+      - name: Set up Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' 
+          # NO usamos 'cache: npm' para evitar el error de package-lock.json
+
+      # 3. Instalación de Dependencias (npm install)
+      - name: Install All Dependencies (Capacitor included)
         run: npm install
 
-      # 4. Compilación del Código Web (React Build)
-      - name: Run Web Build
+      # 4. Compilación del Código Web (npm run build)
+      - name: Run Web Build (Genera la carpeta 'build/')
         run: npm run build
 
-      # 5. Crear la Carpeta Nativa Android (Capacitor)
-      # Esto fallará si la app no está iniciada correctamente, pero el '|| true' la mantiene viva
+      # 5. Crear Carpeta Nativa Android (solo si no existe)
       - name: Add Android Platform
         run: npx cap add android || true 
         
-      # 6. Sincronizar el Build Web con el Proyecto Android Nativo
+      # 6. Sincronizar Web con Android Nativo
       - name: Sync Web Assets to Android Project
         run: npx cap sync android
 
-      # 7. Configurar el SDK de Android
+      # 7. Configurar el SDK de Android y el entorno de Java
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         
-      # 8. Construcción del Proyecto Android con Gradle
+      # 8. Construcción del APK con Gradle
       - name: Build Android Debug APK
         run: cd android && ./gradlew assembleDebug
 
-      # 9. Archivar y Subir el APK
+      # 9. Archivar y Subir el APK como Artefacto descargable
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
