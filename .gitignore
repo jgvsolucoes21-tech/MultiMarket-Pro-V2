@@ -1,0 +1,14 @@
+Dependencias
+/node_modules
+/package-lock.json
+/yarn.lock
+Directorios de compilación y caché
+/build
+/dist
+Entorno local
+.env
+.env.local
+Proyectos Nativos (Capacitor)
+Es VITAL ignorar estas carpetas
+/android
+/ios
