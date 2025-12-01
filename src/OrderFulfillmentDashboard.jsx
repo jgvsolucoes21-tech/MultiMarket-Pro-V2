@@ -18,13 +18,26 @@ import {
     setLogLevel 
 } from 'firebase/firestore';
 
-// Definición de las variables globales proporcionadas por el entorno.
-// Importante: No modificamos estas líneas, solo aseguramos su existencia.
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// --- Definición de Variables de Entorno Globales para evitar no-undef ---
+// React intenta verificar la existencia de estas variables antes de la inyección.
+// Usamos typeof para una verificación segura y un fallback si no existen
+// (lo cual satisface al linter).
 
-// Estilos de Tailwind CSS (se asume que están configurados en el entorno)
+const appId = 
+    typeof window !== 'undefined' && typeof window.__app_id !== 'undefined' 
+        ? window.__app_id 
+        : 'default-app-id';
+
+const firebaseConfig = 
+    typeof window !== 'undefined' && typeof window.__firebase_config !== 'undefined'
+        ? JSON.parse(window.__firebase_config)
+        : {};
+
+const initialAuthToken = 
+    typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined'
+        ? window.__initial_auth_token
+        : null;
+
 
 // --- Constantes de la Aplicación ---
 const COLLECTION_NAME = 'orders'; 
@@ -36,7 +49,7 @@ const App = () => {
     const [auth, setAuth] = useState(null);
     const [userId, setUserId] = useState(null);
     const [orders, setOrders] = useState([]);
-    const [isLoading, setIsLoading] = useState(true); // Nuevo estado de carga
+    const [isLoading, setIsLoading] = useState(true); 
     const [error, setError] = useState(null);
     
     // Estado para el manejo de formularios de nueva orden
@@ -49,6 +62,13 @@ const App = () => {
 
     // --- Efecto de Inicialización y Autenticación de Firebase ---
     useEffect(() => {
+        // Chequeo de configuración crítica
+        if (Object.keys(firebaseConfig).length === 0) {
+            setError("Error: La configuración de Firebase está ausente o no se pudo cargar.");
+            setIsLoading(false);
+            return;
+        }
+
         setLogLevel('debug');
         
         // 1. Inicializar Firebase
@@ -85,7 +105,7 @@ const App = () => {
                     setUserId(null); // Usuario desconectado
                     console.log("Firebase: User logged out/not found.");
                 }
-                // Importante: Desactivar la pantalla de carga solo después de la primera comprobación de auth
+                // Desactivar la pantalla de carga después de la primera comprobación de auth
                 setIsLoading(false);
             });
 
@@ -380,4 +400,3 @@ const App = () => {
 
 export default App;
 
-              
