@@ -19,10 +19,6 @@ import {
 } from 'firebase/firestore';
 
 // --- Definición de Variables de Entorno Globales para evitar no-undef ---
-// React intenta verificar la existencia de estas variables antes de la inyección.
-// Usamos typeof para una verificación segura y un fallback si no existen
-// (lo cual satisface al linter).
-
 const appId = 
     typeof window !== 'undefined' && typeof window.__app_id !== 'undefined' 
         ? window.__app_id 
@@ -46,7 +42,7 @@ const COLLECTION_NAME = 'orders';
 const App = () => {
     // --- Estados de la Aplicación ---
     const [db, setDb] = useState(null);
-    const [auth, setAuth] = useState(null);
+    // REMOVED: const [auth, setAuth] = useState(null); // Eliminado para evitar 'no-unused-vars'
     const [userId, setUserId] = useState(null);
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true); 
@@ -75,10 +71,10 @@ const App = () => {
         try {
             const app = initializeApp(firebaseConfig);
             const firestoreDb = getFirestore(app);
-            const authInstance = getAuth(app);
+            const authInstance = getAuth(app); // Obtenemos la instancia de Auth localmente
             
             setDb(firestoreDb);
-            setAuth(authInstance);
+            // REMOVED: setAuth(authInstance);
 
             // 2. Manejar la Autenticación
             const handleAuth = async () => {
@@ -400,3 +396,4 @@ const App = () => {
 
 export default App;
 
+                
