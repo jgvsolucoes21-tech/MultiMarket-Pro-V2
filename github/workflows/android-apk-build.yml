@@ -1,0 +1,69 @@
+# Workflow para construir y empaquetar una aplicación Capacitor Android (.apk)
+
+name: Build Android APK (Capacitor)
+
+# El workflow se ejecuta cuando se hace un push a la rama 'master' o manualmente
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# Permisos para el CI/CD
+permissions:
+  contents: read
+
+jobs:
+  build_apk:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout del código
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Configurar Node.js (Necesario para React y Capacitor)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' 
+          cache: 'npm' # Habilitar caché para acelerar el proceso
+
+      # 3. Instalación de Dependencias
+      - name: Install Dependencies
+        run: npm install
+
+      # 4. Compilación del Código Web (React Build)
+      # Crea la carpeta 'build/' con los archivos estáticos optimizados
+      - name: Run Web Build
+        run: npm run build
+
+      # 5. Instalación de Capacitor (CLI y dependencias Android)
+      - name: Install Capacitor Core and CLI
+        run: npm install @capacitor/cli @capacitor/core
+
+      # 6. Añadir la Plataforma Android si aún no existe
+      # Esto solo se hace una vez, pero es seguro ejecutarlo
+      - name: Add Android Platform
+        run: npx cap add android || echo "Android platform already added or not required on CI."
+        # Capacitor necesita que la carpeta 'android' esté presente.
+        
+      # 7. Sincronizar el Build Web con el Proyecto Android Nativo
+      - name: Sync Web Assets to Android Project
+        run: npx cap sync android
+
+      # 8. Configurar el SDK de Android
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 9. Construcción del Proyecto Android
+      - name: Build Android Debug APK
+        run: cd android && ./gradlew assembleDebug
+
+      # 10. Archivar y Subir el APK
+      # El APK compilado se encuentra en android/app/build/outputs/apk/debug/
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiAppDespacho-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 5
