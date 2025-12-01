@@ -18,6 +18,45 @@ import {
     setLogLevel 
 } from 'firebase/firestore';
 
+// SVG del logo JGV SOLUTIONS codificado en Base64.
+// Este SVG es una representación fiel de la imagen del logo adjunta,
+// incluyendo la forma de chip blanco y los detalles de circuito turquesa.
+const JGV_LOGO_SVG = `
+<svg width="240" height="240" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="240" height="240" rx="30" fill="transparent"/>
+  
+  <!-- Fondo blanco redondeado (similar al chip/placa) -->
+  <rect x="30" y="50" width="180" height="130" rx="15" fill="white" stroke="#00A99D" stroke-width="2"/>
+  
+  <!-- Texto Principal JGV -->
+  <text x="120" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="50" font-weight="bold" fill="#00A99D">JGV</text>
+  
+  <!-- Texto Secundario SOLUTIONS -->
+  <text x="120" y="150" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="normal" fill="#00A99D">SOLUTIONS</text>
+
+  <!-- Elementos de Circuito (Turquesa) -->
+  <polyline points="20 70 30 70 30 60" stroke="#00A99D" stroke-width="3" fill="none" stroke-linejoin="round"/>
+  <circle cx="20" cy="70" r="5" fill="#00A99D"/>
+
+  <polyline points="220 70 210 70 210 60" stroke="#00A99D" stroke-width="3" fill="none" stroke-linejoin="round"/>
+  <circle cx="220" cy="70" r="5" fill="#00A99D"/>
+  
+  <polyline points="20 160 30 160 30 170" stroke="#00A99D" stroke-width="3" fill="none" stroke-linejoin="round"/>
+  <circle cx="20" cy="160" r="5" fill="#00A99D"/>
+
+  <polyline points="220 160 210 160 210 170" stroke="#00A99D" stroke-width="3" fill="none" stroke-linejoin="round"/>
+  <circle cx="220" cy="160" r="5" fill="#00A99D"/>
+
+  <!-- Línea decorativa central (circuito) -->
+  <line x1="60" y1="130" x2="180" y2="130" stroke="#00A99D" stroke-width="1.5" stroke-dasharray="3 3"/>
+
+</svg>
+`;
+
+// Función para convertir SVG a una URL de datos (data URL)
+const svgToDataURL = (svg) => `data:image/svg+xml;base64,${btoa(svg)}`;
+
+
 // --- Definición de Variables de Entorno Globales para evitar no-undef ---
 const appId = 
     typeof window !== 'undefined' && typeof window.__app_id !== 'undefined' 
@@ -42,7 +81,6 @@ const COLLECTION_NAME = 'orders';
 const App = () => {
     // --- Estados de la Aplicación ---
     const [db, setDb] = useState(null);
-    // REMOVED: const [auth, setAuth] = useState(null); // Eliminado para evitar 'no-unused-vars'
     const [userId, setUserId] = useState(null);
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true); 
@@ -71,10 +109,9 @@ const App = () => {
         try {
             const app = initializeApp(firebaseConfig);
             const firestoreDb = getFirestore(app);
-            const authInstance = getAuth(app); // Obtenemos la instancia de Auth localmente
+            const authInstance = getAuth(app); 
             
             setDb(firestoreDb);
-            // REMOVED: setAuth(authInstance);
 
             // 2. Manejar la Autenticación
             const handleAuth = async () => {
@@ -153,7 +190,7 @@ const App = () => {
         
     }, [db, userId]); // Depende de db y userId
 
-    // --- Handlers de Formulario ---
+    // --- Handlers de Formulario y Operaciones CRUD (omitted for brevity, same as previous version) ---
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setNewOrder(prev => ({ 
@@ -162,9 +199,6 @@ const App = () => {
         }));
     };
 
-    // --- Operaciones CRUD de Firestore ---
-    
-    // 1. Agregar nueva orden
     const addOrder = async (e) => {
         e.preventDefault();
         if (!db || !userId || !newOrder.customerName || !newOrder.item) return;
@@ -184,7 +218,6 @@ const App = () => {
         }
     };
 
-    // 2. Actualizar el estado de una orden
     const updateOrderStatus = async (id, newStatus) => {
         if (!db || !userId) return;
 
@@ -202,7 +235,6 @@ const App = () => {
         }
     };
 
-    // 3. Eliminar una orden
     const deleteOrder = async (id) => {
         if (!db || !userId) return;
         
@@ -217,19 +249,49 @@ const App = () => {
         }
     };
 
-    // --- Renderizado Condicional: Pantalla de Carga/Error ---
+
+    // --- Renderizado Condicional: PANTALLA DE CARGA PERSONALIZADA (Splash) ---
     if (isLoading) {
+        // Estilos para replicar el color turquesa (#21B3A9) y el diseño centrado de la imagen
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white p-4">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-400 mx-auto"></div>
-                    <p className="mt-4 text-xl font-semibold">Cargando aplicación y autenticando...</p>
-                    <p className="text-sm text-gray-400 mt-2">Esto puede tomar un momento mientras se conecta a Firebase.</p>
+            <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#21B3A9' }}>
+                <div className="text-center p-4">
+                    
+                    {/* Logo JGV SOLUTIONS usando Data URL de SVG */}
+                    <div className="relative w-40 h-40 mx-auto mb-10">
+                        {/* Fondo circular borroso replicando el efecto de la imagen */}
+                        <div className="absolute inset-0 bg-white opacity-20 rounded-full blur-xl scale-110"></div>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <img 
+                                src={svgToDataURL(JGV_LOGO_SVG)} 
+                                alt="Logo JGV Solutions" 
+                                className="w-full h-full object-contain rounded-xl shadow-lg"
+                            />
+                        </div>
+                    </div>
+
+
+                    {/* Nombre y Versión de la App */}
+                    <h1 className="text-4xl font-extrabold text-white mb-2 tracking-wide">
+                        MultiMarket-Pro
+                    </h1>
+                    <p className="text-white text-lg mb-10 opacity-75">
+                        v1.0.0
+                    </p>
+
+                    {/* Spinner de Carga (similar al círculo vacío) */}
+                    <div className="animate-spin rounded-full h-10 w-10 border-4 border-t-4 border-white border-opacity-75 mx-auto"></div>
+                    
+                    {/* Mensaje de Inicialización */}
+                    <p className="mt-8 text-white text-xl font-semibold">
+                        Inicializando...
+                    </p>
                 </div>
             </div>
         );
     }
     
+    // --- Renderizado de Error (Mantenido) ---
     if (error) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-red-900 text-white p-4">
@@ -243,7 +305,7 @@ const App = () => {
         );
     }
 
-    // --- Componente de Tarjeta de Orden ---
+    // --- Componente de Tarjeta de Orden (Mantenido) ---
     const OrderCard = ({ order }) => {
         // Lógica de color basada en el estado
         let statusColor = 'bg-gray-500';
@@ -396,3 +458,4 @@ const App = () => {
 
 export default App;
 
+            
