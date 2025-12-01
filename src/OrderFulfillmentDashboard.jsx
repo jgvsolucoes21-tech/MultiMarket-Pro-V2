@@ -19,8 +19,7 @@ import {
 } from 'firebase/firestore';
 
 // SVG del logo JGV SOLUTIONS codificado en Base64.
-// Este SVG es una representación fiel de la imagen del logo adjunta,
-// incluyendo la forma de chip blanco y los detalles de circuito turquesa.
+// Es una representación fiel de la imagen que adjuntó.
 const JGV_LOGO_SVG = `
 <svg width="240" height="240" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect x="0" y="0" width="240" height="240" rx="30" fill="transparent"/>
@@ -57,16 +56,18 @@ const JGV_LOGO_SVG = `
 const svgToDataURL = (svg) => `data:image/svg+xml;base64,${btoa(svg)}`;
 
 
-// --- Definición de Variables de Entorno Globales para evitar no-undef ---
+// --- Definición de Variables de Entorno Globales con Fallback para APK ---
 const appId = 
     typeof window !== 'undefined' && typeof window.__app_id !== 'undefined' 
         ? window.__app_id 
         : 'default-app-id';
 
+// *IMPORTANTE: Añadir un objeto vacío como fallback para que la app inicie
+// cuando se compila en un APK sin la configuración de Firebase inyectada.*
 const firebaseConfig = 
     typeof window !== 'undefined' && typeof window.__firebase_config !== 'undefined'
         ? JSON.parse(window.__firebase_config)
-        : {};
+        : {}; // Fallback: Objeto vacío para que la app no falle al iniciar
 
 const initialAuthToken = 
     typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined'
@@ -85,6 +86,7 @@ const App = () => {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true); 
     const [error, setError] = useState(null);
+    const [isFirebaseReady, setIsFirebaseReady] = useState(false); // Nuevo estado de control
     
     // Estado para el manejo de formularios de nueva orden
     const [newOrder, setNewOrder] = useState({ 
@@ -96,16 +98,23 @@ const App = () => {
 
     // --- Efecto de Inicialización y Autenticación de Firebase ---
     useEffect(() => {
-        // Chequeo de configuración crítica
-        if (Object.keys(firebaseConfig).length === 0) {
-            setError("Error: La configuración de Firebase está ausente o no se pudo cargar.");
+        // Chequeo si la configuración de Firebase es válida (para este entorno)
+        const isConfigValid = Object.keys(firebaseConfig).length > 0 && 
+                              firebaseConfig.apiKey && 
+                              firebaseConfig.projectId;
+
+        if (!isConfigValid) {
+            // Este bloque se ejecuta cuando se compila el APK
+            console.warn("Firebase: Configuración ausente. La base de datos no estará activa.");
+            setError("Modo Offline: Base de datos no disponible. La app iniciará, pero las funciones de DB no funcionarán.");
             setIsLoading(false);
+            setIsFirebaseReady(false); // Marca Firebase como NO listo
             return;
         }
-
+        
+        // --- Proceso de Inicialización normal cuando la configuración SÍ está presente ---
         setLogLevel('debug');
         
-        // 1. Inicializar Firebase
         try {
             const app = initializeApp(firebaseConfig);
             const firestoreDb = getFirestore(app);
@@ -113,7 +122,6 @@ const App = () => {
             
             setDb(firestoreDb);
 
-            // 2. Manejar la Autenticación
             const handleAuth = async () => {
                 try {
                     if (initialAuthToken) {
@@ -125,72 +133,77 @@ const App = () => {
                     }
                 } catch (e) {
                     console.error("Firebase Auth Error:", e);
-                    setError("Error de autenticación. Ver consola para más detalles.");
+                    setError(`Error de autenticación: ${e.message}`);
                 }
             };
             
-            // 3. Establecer el observador de estado de autenticación
             const unsubscribe = onAuthStateChanged(authInstance, (user) => {
                 if (user) {
                     setUserId(user.uid);
                     console.log(`Firebase: User ID set to ${user.uid}`);
                 } else {
-                    setUserId(null); // Usuario desconectado
+                    setUserId(null); 
                     console.log("Firebase: User logged out/not found.");
                 }
-                // Desactivar la pantalla de carga después de la primera comprobación de auth
+                setIsFirebaseReady(true); // Marca Firebase como listo
                 setIsLoading(false);
             });
 
-            // Iniciar el proceso de autenticación
             handleAuth();
             
-            // Cleanup: Desuscribirse del observador de auth al desmontar
             return () => unsubscribe();
             
         } catch (e) {
             console.error("Firebase Init Error:", e);
             setError("Error al inicializar Firebase. Ver consola para más detalles.");
             setIsLoading(false);
+            setIsFirebaseReady(false);
         }
     }, []); // Se ejecuta solo una vez al montar
 
     // --- Efecto para Suscripción a Firestore (onSnapshot) ---
     useEffect(() => {
-        // Ejecutar solo si Firebase y el userId están listos
-        if (!db || !userId) {
-            console.log("Firestore subscription skipped: DB or User ID not ready.");
+        // Ejecutar solo si Firebase está listo Y la configuración es válida
+        if (!isFirebaseReady || !db || !userId) {
+            console.log("Firestore subscription skipped: Firebase not ready or missing config.");
             return;
         }
 
-        // Definir la ruta de la colección privada del usuario
-        // /artifacts/{appId}/users/{userId}/orders
         const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
         const q = query(collection(db, path));
 
         console.log(`Firestore: Subscribing to path: ${path}`);
         
-        // Suscripción en tiempo real a la colección
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const fetchedOrders = [];
             querySnapshot.forEach((doc) => {
                 fetchedOrders.push({ id: doc.id, ...doc.data() });
             });
-            // Ordenar por nombre del cliente para consistencia (en memoria)
             fetchedOrders.sort((a, b) => a.customerName.localeCompare(b.customerName));
             setOrders(fetchedOrders);
             console.log("Firestore: Data updated.");
         }, (err) => {
             console.error("Firestore Snapshot Error:", err);
-            setError("Error de sincronización con Firestore. Ver consola.");
+            // No sobrescribir errores críticos anteriores, pero registrar este.
+            if (isFirebaseReady) {
+                // Solo registramos errores de snapshot si pensamos que DB debería estar funcionando
+                console.error("Error de sincronización con Firestore.");
+            }
         });
 
-        // Cleanup: Desuscribirse al desmontar o si cambian las dependencias
         return () => unsubscribe();
         
-    }, [db, userId]); // Depende de db y userId
+    }, [db, userId, isFirebaseReady]); // Depende de db, userId, y si Firebase se inicializó con éxito
 
-    // --- Handlers de Formulario y Operaciones CRUD (omitted for brevity, same as previous version) ---
+    // --- Handlers de Formulario y Operaciones CRUD ---
+    const checkDbStatus = () => {
+        if (!isFirebaseReady) {
+            alert("FUNCIÓN BLOQUEADA: La base de datos no está disponible. Este modo ocurre al ejecutar el APK sin configurar Firebase.");
+            return false;
+        }
+        return true;
+    };
+    
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setNewOrder(prev => ({ 
@@ -201,7 +214,7 @@ const App = () => {
 
     const addOrder = async (e) => {
         e.preventDefault();
-        if (!db || !userId || !newOrder.customerName || !newOrder.item) return;
+        if (!checkDbStatus() || !newOrder.customerName || !newOrder.item) return;
 
         const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
         
@@ -214,12 +227,13 @@ const App = () => {
             setNewOrder({ customerName: '', item: '', quantity: 1, status: 'Pending' });
         } catch (e) {
             console.error("Error al agregar documento: ", e);
-            setError("Error al guardar la orden.");
+            // Reemplazar alert() con un modal/mensaje custom si fuera necesario
+            alert("Error al guardar la orden. Ver consola."); 
         }
     };
 
     const updateOrderStatus = async (id, newStatus) => {
-        if (!db || !userId) return;
+        if (!checkDbStatus()) return;
 
         const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
         const docRef = doc(db, path, id);
@@ -231,12 +245,12 @@ const App = () => {
             });
         } catch (e) {
             console.error("Error al actualizar documento: ", e);
-            setError("Error al actualizar el estado de la orden.");
+            alert("Error al actualizar el estado de la orden. Ver consola.");
         }
     };
 
     const deleteOrder = async (id) => {
-        if (!db || !userId) return;
+        if (!checkDbStatus()) return;
         
         const path = `artifacts/${appId}/users/${userId}/${COLLECTION_NAME}`;
         const docRef = doc(db, path, id);
@@ -245,7 +259,7 @@ const App = () => {
             await deleteDoc(docRef);
         } catch (e) {
             console.error("Error al eliminar documento: ", e);
-            setError("Error al eliminar la orden.");
+            alert("Error al eliminar la orden. Ver consola.");
         }
     };
 
@@ -257,9 +271,8 @@ const App = () => {
             <div className="flex flex-col items-center justify-center min-h-screen" style={{ backgroundColor: '#21B3A9' }}>
                 <div className="text-center p-4">
                     
-                    {/* Logo JGV SOLUTIONS usando Data URL de SVG */}
+                    {/* Contenedor del Logo con efecto borroso de fondo */}
                     <div className="relative w-40 h-40 mx-auto mb-10">
-                        {/* Fondo circular borroso replicando el efecto de la imagen */}
                         <div className="absolute inset-0 bg-white opacity-20 rounded-full blur-xl scale-110"></div>
                         <div className="absolute inset-0 flex items-center justify-center">
                             <img 
@@ -270,7 +283,6 @@ const App = () => {
                         </div>
                     </div>
 
-
                     {/* Nombre y Versión de la App */}
                     <h1 className="text-4xl font-extrabold text-white mb-2 tracking-wide">
                         MultiMarket-Pro
@@ -279,7 +291,7 @@ const App = () => {
                         v1.0.0
                     </p>
 
-                    {/* Spinner de Carga (similar al círculo vacío) */}
+                    {/* Spinner de Carga */}
                     <div className="animate-spin rounded-full h-10 w-10 border-4 border-t-4 border-white border-opacity-75 mx-auto"></div>
                     
                     {/* Mensaje de Inicialización */}
@@ -291,23 +303,15 @@ const App = () => {
         );
     }
     
-    // --- Renderizado de Error (Mantenido) ---
-    if (error) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-red-900 text-white p-4">
-                <div className="text-center p-6 bg-red-800 rounded-xl shadow-2xl">
-                    <h1 className="text-2xl font-bold mb-4">¡Error Crítico!</h1>
-                    <p className="mb-4">No se pudo inicializar la aplicación o autenticar el usuario.</p>
-                    <p className="font-mono text-sm break-all">{error}</p>
-                    <p className="mt-4 text-sm">Verifique la consola del navegador o los logs del dispositivo para detalles.</p>
-                </div>
-            </div>
-        );
-    }
+    // --- Renderizado de Error o Advertencia de Modo Offline ---
+    const ShowErrorOrWarning = ({ message }) => (
+        <div className="fixed top-0 left-0 right-0 p-3 text-center bg-yellow-500 text-white font-bold shadow-lg z-50">
+            {message}
+        </div>
+    );
 
-    // --- Componente de Tarjeta de Orden (Mantenido) ---
+    // --- Componente de Tarjeta de Orden ---
     const OrderCard = ({ order }) => {
-        // Lógica de color basada en el estado
         let statusColor = 'bg-gray-500';
         let buttonText = 'Mark as Processing';
         let nextStatus = 'Processing';
@@ -331,7 +335,7 @@ const App = () => {
             case 'Delivered':
                 statusColor = 'bg-green-700';
                 buttonText = 'Completado';
-                nextStatus = 'Delivered'; // No cambia más
+                nextStatus = 'Delivered'; 
                 break;
             default:
                 break;
@@ -385,6 +389,10 @@ const App = () => {
     // --- Renderizado Principal (Dashboard) ---
     return (
         <div className="min-h-screen bg-gray-100 p-4 sm:p-6 md:p-8">
+            
+            {/* Mostrar el mensaje de advertencia si la DB no está activa */}
+            {!isFirebaseReady && error && <ShowErrorOrWarning message={error} />}
+
             <header className="mb-8 text-center">
                 <h1 className="text-4xl font-extrabold text-gray-900 mb-2">Panel de Gestión de Órdenes</h1>
                 <p className="text-gray-600 text-lg">
@@ -429,7 +437,7 @@ const App = () => {
                     />
                     <button
                         type="submit"
-                        disabled={!newOrder.customerName || !newOrder.item}
+                        disabled={!newOrder.customerName || !newOrder.item || !isFirebaseReady}
                         className="col-span-2 md:col-span-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 disabled:bg-green-300"
                     >
                         Crear Orden
@@ -440,9 +448,14 @@ const App = () => {
             {/* Lista de Órdenes */}
             <section className="max-w-6xl mx-auto">
                 <h2 className="text-3xl font-bold text-gray-800 mb-6">Órdenes Activas ({orders.length})</h2>
-                {orders.length === 0 ? (
+                {orders.length === 0 && isFirebaseReady ? (
                     <div className="text-center p-10 bg-white rounded-xl shadow-md">
                         <p className="text-xl text-gray-500">No hay órdenes pendientes. ¡Añade una nueva!</p>
+                    </div>
+                ) : orders.length === 0 && !isFirebaseReady ? (
+                    <div className="text-center p-10 bg-red-100 text-red-700 rounded-xl shadow-md border border-red-300">
+                        <p className="text-xl font-bold mb-2">Base de Datos Desconectada</p>
+                        <p className="text-lg">No se pudo cargar la lista de órdenes porque la configuración de Firebase está ausente (modo APK).</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -451,11 +464,4 @@ const App = () => {
                         ))}
                     </div>
                 )}
-            </section>
-        </div>
-    );
-};
-
-export default App;
-
-            
+    
